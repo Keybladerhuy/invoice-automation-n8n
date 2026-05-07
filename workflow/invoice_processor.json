@@ -1,0 +1,350 @@
+{
+  "name": "Invoice Processor — AI-Powered Document Extraction",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute",
+              "value": 5
+            }
+          ]
+        },
+        "filters": {
+          "labelIds": ["invoice-inbox"],
+          "readStatus": "unread",
+          "includeAttachments": true
+        },
+        "downloadAttachments": true
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [200, 400],
+      "notes": "Watches the 'invoice-inbox' Gmail label every 5 minutes for new unread messages. downloadAttachments=true fetches the raw binary of each attachment so we can forward it to GPT-4o. Create this label in Gmail and set up a filter to apply it to incoming invoices.",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail (invoice account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-attachment",
+              "leftValue": "={{ Object.keys($binary || {}).length }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-attachment",
+      "name": "Has Attachment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 400],
+      "notes": "Skip emails that have no attachments — this avoids wasting OpenAI API calls on text-only notifications or newsletters that land in the label by mistake. The 'true' branch continues; the 'false' branch ends silently."
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-attachments",
+      "name": "Split Attachments",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [680, 300],
+      "notes": "Processes one attachment at a time. Some invoices arrive with both a PDF and a cover image in the same email — splitting ensures each attachment gets its own row in the output sheet rather than being grouped together."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"input\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"input_text\",\n          \"text\": {{ JSON.stringify($vars.EXTRACTION_PROMPT) }}\n        },\n        {\n          \"type\": {{ $binary.data.mimeType && $binary.data.mimeType.startsWith('image/') ? '\"input_image\"' : '\"input_file\"' }},\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": {{ JSON.stringify($binary.data.mimeType || 'application/pdf') }},\n            \"data\": {{ JSON.stringify($binary.data.data) }}\n          }\n        }\n      ]\n    }\n  ],\n  \"text\": {\n    \"format\": {\n      \"type\": \"json_schema\",\n      \"name\": \"invoice_extraction\",\n      \"strict\": true,\n      \"schema\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"invoice_number\": { \"type\": [\"string\", \"null\"] },\n          \"vendor_name\":    { \"type\": [\"string\", \"null\"] },\n          \"invoice_date\":   { \"type\": [\"string\", \"null\"] },\n          \"due_date\":       { \"type\": [\"string\", \"null\"] },\n          \"total_amount\":   { \"type\": [\"number\", \"null\"] },\n          \"currency\":       { \"type\": [\"string\", \"null\"] },\n          \"line_items\": {\n            \"oneOf\": [\n              {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"description\": { \"type\": \"string\" },\n                    \"quantity\":    { \"type\": [\"number\", \"null\"] },\n                    \"unit_price\":  { \"type\": [\"number\", \"null\"] }\n                  },\n                  \"required\": [\"description\", \"quantity\", \"unit_price\"],\n                  \"additionalProperties\": false\n                }\n              },\n              { \"type\": \"null\" }\n            ]\n          },\n          \"notes\":      { \"type\": [\"string\", \"null\"] },\n          \"confidence\": { \"type\": \"string\", \"enum\": [\"high\", \"medium\", \"low\"] }\n        },\n        \"required\": [\"invoice_number\", \"vendor_name\", \"invoice_date\", \"due_date\", \"total_amount\", \"currency\", \"line_items\", \"notes\", \"confidence\"],\n        \"additionalProperties\": false\n      }\n    }\n  }\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "openai-extract",
+      "name": "OpenAI — Extract Invoice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 300],
+      "notes": "Sends the attachment binary (PDF or image) to GPT-4o via the OpenAI Responses API. Uses a strict JSON schema response_format so the model is constrained to return exactly the fields we need — no free-form prose. The EXTRACTION_PROMPT workflow variable holds the full prompt text (set it in n8n → Variables). Timeout is 60s to accommodate large multi-page PDFs.",
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Pull the structured output from the OpenAI Responses API envelope\nconst responseBody = $input.item.json;\n\n// The Responses API returns output[0].content[0].text for text responses\nlet rawText;\ntry {\n  rawText = responseBody.output[0].content[0].text;\n} catch (e) {\n  throw new Error('Unexpected OpenAI response shape: ' + JSON.stringify(responseBody));\n}\n\n// Parse the strict JSON the model was forced to return\nlet extracted;\ntry {\n  extracted = JSON.parse(rawText);\n} catch (e) {\n  throw new Error('OpenAI returned non-JSON: ' + rawText);\n}\n\nconst {\n  invoice_number,\n  vendor_name,\n  invoice_date,\n  due_date,\n  total_amount,\n  currency,\n  line_items,\n  notes,\n  confidence\n} = extracted;\n\n// Required fields for review routing\nconst REQUIRED = ['invoice_number', 'vendor_name', 'total_amount'];\nconst missingFields = REQUIRED.filter(f => extracted[f] == null);\n\n// Route to human review if confidence is not high OR any required field is missing\nconst needs_review = confidence !== 'high' || missingFields.length > 0;\n\n// Build a human-readable reason for the review sheet\nlet review_reason = null;\nif (needs_review) {\n  const reasons = [];\n  if (confidence !== 'high') reasons.push(`confidence=${confidence}`);\n  if (missingFields.length > 0) reasons.push(`missing: ${missingFields.join(', ')}`);\n  review_reason = reasons.join('; ');\n}\n\n// Serialize line_items as a compact JSON string (one cell in Sheets)\nconst line_items_json = line_items ? JSON.stringify(line_items) : null;\n\n// Grab email + attachment metadata from the Gmail trigger (two items up in the chain)\nconst emailData = $('Gmail Trigger').item.json;\nconst binaryData = $input.item.binary?.data || {};\nconst attachment_filename = binaryData.fileName || binaryData.fileExtension\n  ? `${binaryData.fileName || 'attachment'}`\n  : 'unknown';\n\nreturn [{\n  json: {\n    // Metadata\n    timestamp: new Date().toISOString(),\n    email_from: emailData.from,\n    email_subject: emailData.subject,\n    attachment_filename,\n\n    // Extracted fields\n    invoice_number,\n    vendor_name,\n    invoice_date,\n    due_date,\n    total_amount,\n    currency,\n    line_items_json,\n    notes,\n    confidence,\n\n    // Routing\n    needs_review,\n    review_reason,\n\n    // Raw response for audit trail\n    raw_json: rawText\n  }\n}];\n"
+      },
+      "id": "code-parse-classify",
+      "name": "Parse & Classify",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 300],
+      "notes": "Unwraps the OpenAI Responses API envelope, parses the strict JSON payload, and computes the 'needs_review' boolean. Rule: needs_review = true if confidence != 'high' OR if invoice_number, vendor_name, or total_amount is null. Also serialises line_items to a JSON string for single-cell storage in Google Sheets, and attaches email metadata (sender, subject, filename) for the audit trail."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-review-check",
+              "leftValue": "={{ $json.needs_review }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-needs-review",
+      "name": "Needs Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1400, 300],
+      "notes": "Branches on the needs_review flag computed by the previous Code node. 'true' branch → Needs Review sheet + warning Slack message. 'false' branch → main Invoices sheet + success Slack message."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "mode": "define",
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "mode": "define",
+          "value": "Invoices"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp":           "={{ $json.timestamp }}",
+            "email_from":          "={{ $json.email_from }}",
+            "email_subject":       "={{ $json.email_subject }}",
+            "attachment_filename": "={{ $json.attachment_filename }}",
+            "invoice_number":      "={{ $json.invoice_number }}",
+            "vendor_name":         "={{ $json.vendor_name }}",
+            "invoice_date":        "={{ $json.invoice_date }}",
+            "due_date":            "={{ $json.due_date }}",
+            "total_amount":        "={{ $json.total_amount }}",
+            "currency":            "={{ $json.currency }}",
+            "line_items_json":     "={{ $json.line_items_json }}",
+            "notes":               "={{ $json.notes }}",
+            "confidence":          "={{ $json.confidence }}",
+            "raw_json":            "={{ $json.raw_json }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-main",
+      "name": "Sheets — Append Invoice",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1640, 200],
+      "notes": "Appends a new row to the 'Invoices' tab of your Google Sheet. Replace REPLACE_WITH_YOUR_GOOGLE_SHEET_ID with the Sheet ID from the URL (the long string between /d/ and /edit). The sheet must have a header row matching these column names — see the README for the exact schema.",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets (invoice account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "mode": "define",
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID"
+        },
+        "sheetName": {
+          "mode": "define",
+          "value": "Needs Review"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp":           "={{ $json.timestamp }}",
+            "email_from":          "={{ $json.email_from }}",
+            "email_subject":       "={{ $json.email_subject }}",
+            "attachment_filename": "={{ $json.attachment_filename }}",
+            "invoice_number":      "={{ $json.invoice_number }}",
+            "vendor_name":         "={{ $json.vendor_name }}",
+            "invoice_date":        "={{ $json.invoice_date }}",
+            "due_date":            "={{ $json.due_date }}",
+            "total_amount":        "={{ $json.total_amount }}",
+            "currency":            "={{ $json.currency }}",
+            "line_items_json":     "={{ $json.line_items_json }}",
+            "notes":               "={{ $json.notes }}",
+            "confidence":          "={{ $json.confidence }}",
+            "review_reason":       "={{ $json.review_reason }}",
+            "raw_json":            "={{ $json.raw_json }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "sheets-review",
+      "name": "Sheets — Needs Review",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1640, 400],
+      "notes": "Appends rows that need human review to the 'Needs Review' tab. Includes a review_reason column explaining why it was flagged (e.g. 'confidence=medium' or 'missing: invoice_number'). A team member should check this tab regularly and either correct the data or reprocess the attachment.",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets (invoice account)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "mode": "define",
+          "value": "REPLACE_WITH_YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "=✅ *Invoice processed*\n>Vendor: {{ $json.vendor_name || '_unknown_' }}\n>Amount: {{ $json.currency }} {{ $json.total_amount }}\n>Invoice #: {{ $json.invoice_number || '_unknown_' }}\n>Confidence: {{ $json.confidence }}\n>File: {{ $json.attachment_filename }}",
+        "otherOptions": {}
+      },
+      "id": "slack-success",
+      "name": "Slack — Processed ✅",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1880, 200],
+      "notes": "Posts a success summary to your Slack channel after a high-confidence invoice is written to the main sheet. Replace REPLACE_WITH_YOUR_SLACK_CHANNEL_ID with the channel ID (right-click channel in Slack → Copy link → the C... string at the end).",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack (invoice team)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "mode": "define",
+          "value": "REPLACE_WITH_YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "=⚠️ *Invoice needs review*\n>File: {{ $json.attachment_filename }}\n>From: {{ $json.email_from }}\n>Reason: {{ $json.review_reason }}\n>Vendor: {{ $json.vendor_name || '_could not extract_' }}\n>Check the *Needs Review* tab in Google Sheets.",
+        "otherOptions": {}
+      },
+      "id": "slack-review",
+      "name": "Slack — Needs Review ⚠️",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1880, 400],
+      "notes": "Sends a warning to Slack when an invoice couldn't be processed with high confidence. Includes the reason for flagging and a pointer to the Needs Review sheet. A team member should action this within 1 business day to avoid payment delays.",
+      "credentials": {
+        "slackOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack (invoice team)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [{ "node": "Has Attachment?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Has Attachment?": {
+      "main": [
+        [{ "node": "Split Attachments", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Split Attachments": {
+      "main": [
+        [{ "node": "OpenAI — Extract Invoice", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI — Extract Invoice": {
+      "main": [
+        [{ "node": "Parse & Classify", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Classify": {
+      "main": [
+        [{ "node": "Needs Review?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Review?": {
+      "main": [
+        [{ "node": "Sheets — Append Invoice", "type": "main", "index": 0 }],
+        [{ "node": "Sheets — Needs Review", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets — Append Invoice": {
+      "main": [
+        [{ "node": "Slack — Processed ✅", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets — Needs Review": {
+      "main": [
+        [{ "node": "Slack — Needs Review ⚠️", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "portfolio" },
+    { "name": "invoice-processing" },
+    { "name": "ai-automation" }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-05-07T00:00:00.000Z",
+  "versionId": "1"
+}
