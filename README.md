@@ -2,7 +2,7 @@
 
 ![Invoice automation workflow](./img/workflow-animation.svg)
 
-> Automatically extract invoice data from email attachments and write it to Google Sheets — no manual entry required.
+> Automatically extract invoice data from email attachments, log it to Google Sheets, and notify your team on Slack or Teams — no manual entry, no missed invoices.
 
 ---
 
@@ -68,6 +68,8 @@ Gmail (label: invoice-inbox)
         │
         └─ confidence<high OR missing field    ──▶  Sheets "Needs Review"  ──▶  Slack ⚠️
 ```
+
+![n8n workflow canvas](./img/n8n-workflow.png)
 
 ---
 
