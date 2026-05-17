@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-A portfolio MVP demonstrating AI-powered invoice processing for freelance clients. An n8n workflow watches a Gmail label for invoice attachments (PDF or image), extracts structured data via GPT-4o, and writes rows to Google Sheets with a Slack notification. Designed to be explainable on a screen share to non-technical clients.
+A portfolio MVP demonstrating AI-powered invoice processing for businesses. An n8n workflow watches a Gmail label for invoice attachments (PDF or image), extracts structured data via GPT-4o, and writes rows to Google Sheets with a Slack notification. Designed to be explainable on a screen share to non-technical clients.
 
 ## Generating demo PDFs
 

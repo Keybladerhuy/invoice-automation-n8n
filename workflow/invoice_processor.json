@@ -12,18 +12,26 @@
           ]
         },
         "filters": {
-          "labelIds": ["invoice-inbox"],
+          "labelIds": [
+            "INBOX"
+          ],
           "readStatus": "unread",
           "includeAttachments": true
         },
-        "downloadAttachments": true
+        "options": {
+          "downloadAttachments": true
+        },
+        "simple": false
       },
       "id": "gmail-trigger",
       "name": "Gmail Trigger",
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1,
-      "position": [200, 400],
-      "notes": "Watches the 'invoice-inbox' Gmail label every 5 minutes for new unread messages. downloadAttachments=true fetches the raw binary of each attachment so we can forward it to GPT-4o. Create this label in Gmail and set up a filter to apply it to incoming invoices.",
+      "position": [
+        200,
+        400
+      ],
+      "notes": "Watches the INBOX every 5 minutes for new unread messages. Simplify must be OFF for binary attachment data to be included in the output. The raw binary is forwarded directly to the LLM for extraction.",
       "credentials": {
         "gmailOAuth2": {
           "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
@@ -43,7 +51,7 @@
             {
               "id": "has-attachment",
               "leftValue": "={{ Object.keys($binary || {}).length }}",
-              "rightValue": "0",
+              "rightValue": 0,
               "operator": {
                 "type": "number",
                 "operation": "gt"
@@ -58,8 +66,11 @@
       "name": "Has Attachment?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [440, 400],
-      "notes": "Skip emails that have no attachments — this avoids wasting OpenAI API calls on text-only notifications or newsletters that land in the label by mistake. The 'true' branch continues; the 'false' branch ends silently."
+      "position": [
+        440,
+        400
+      ],
+      "notes": "Skip emails that have no attachments — this avoids wasting LLM API calls on text-only notifications or newsletters that land in the label by mistake. The 'true' branch continues; the 'false' branch ends silently."
     },
     {
       "parameters": {
@@ -70,13 +81,49 @@
       "name": "Split Attachments",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [680, 300],
+      "position": [
+        680,
+        300
+      ],
       "notes": "Processes one attachment at a time. Some invoices arrive with both a PDF and a cover image in the same email — splitting ensures each attachment gets its own row in the output sheet rather than being grouped together."
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "provider-is-openai",
+              "leftValue": "ollama",
+              "rightValue": "openai",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "provider-switch",
+      "name": "Provider Switch",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        920,
+        300
+      ],
+      "notes": "Routes to either the OpenAI or Ollama HTTP node based on the LLM_PROVIDER workflow variable.\n\nSet these three variables in n8n → Settings → Variables:\n\n  LLM_PROVIDER  — which provider to use\n                  'openai'  → uses the OpenAI Responses API\n                  'ollama'  → uses a local Ollama model\n\n  LLM_BASE_URL  — root URL of the API (no trailing slash)\n                  OpenAI: 'https://api.openai.com'\n                  Ollama: 'http://localhost:11434'\n\n  LLM_MODEL     — model name passed in the request body\n                  OpenAI: 'gpt-4o'\n                  Ollama: 'qwen3:8b'  ← recommended for local demos\n                         'qwen2.5:7b' ← alternative, no thinking overhead\n\ntrue branch  → OpenAI — Extract Invoice\nfalse branch → Ollama — Extract Invoice"
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "https://api.openai.com/v1/responses",
+        "url": "={{ $env.LLM_BASE_URL }}/v1/responses",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "openAiApi",
         "sendHeaders": true,
@@ -90,7 +137,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"input\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"input_text\",\n          \"text\": {{ JSON.stringify($vars.EXTRACTION_PROMPT) }}\n        },\n        {\n          \"type\": {{ $binary.data.mimeType && $binary.data.mimeType.startsWith('image/') ? '\"input_image\"' : '\"input_file\"' }},\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": {{ JSON.stringify($binary.data.mimeType || 'application/pdf') }},\n            \"data\": {{ JSON.stringify($binary.data.data) }}\n          }\n        }\n      ]\n    }\n  ],\n  \"text\": {\n    \"format\": {\n      \"type\": \"json_schema\",\n      \"name\": \"invoice_extraction\",\n      \"strict\": true,\n      \"schema\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"invoice_number\": { \"type\": [\"string\", \"null\"] },\n          \"vendor_name\":    { \"type\": [\"string\", \"null\"] },\n          \"invoice_date\":   { \"type\": [\"string\", \"null\"] },\n          \"due_date\":       { \"type\": [\"string\", \"null\"] },\n          \"total_amount\":   { \"type\": [\"number\", \"null\"] },\n          \"currency\":       { \"type\": [\"string\", \"null\"] },\n          \"line_items\": {\n            \"oneOf\": [\n              {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"description\": { \"type\": \"string\" },\n                    \"quantity\":    { \"type\": [\"number\", \"null\"] },\n                    \"unit_price\":  { \"type\": [\"number\", \"null\"] }\n                  },\n                  \"required\": [\"description\", \"quantity\", \"unit_price\"],\n                  \"additionalProperties\": false\n                }\n              },\n              { \"type\": \"null\" }\n            ]\n          },\n          \"notes\":      { \"type\": [\"string\", \"null\"] },\n          \"confidence\": { \"type\": \"string\", \"enum\": [\"high\", \"medium\", \"low\"] }\n        },\n        \"required\": [\"invoice_number\", \"vendor_name\", \"invoice_date\", \"due_date\", \"total_amount\", \"currency\", \"line_items\", \"notes\", \"confidence\"],\n        \"additionalProperties\": false\n      }\n    }\n  }\n}",
+        "jsonBody": "={\n  \"model\": {{ JSON.stringify($env.LLM_MODEL) }},\n  \"input\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"input_text\",\n          \"text\": {{ JSON.stringify('You are a precise, bilingual (English and Japanese) invoice data extraction specialist.\\n\\nYour task is to extract structured data from the provided invoice image or document.\\n\\nRULES:\\n- Return ONLY valid JSON. No markdown, no explanation, no preamble, no trailing text.\\n- If a field is not present or cannot be determined with confidence, return null. Do NOT guess or infer values that are not clearly stated.\\n- Dates must be formatted as ISO 8601 (YYYY-MM-DD). If only year+month are given, return YYYY-MM-01.\\n- Amounts must be numeric (no currency symbols, no commas). E.g., 12,500 → 12500. 1,234.56 → 1234.56.\\n- Currency must be the 3-letter ISO code (JPY, USD, EUR, GBP, etc.). Infer from symbols: ¥/円 → JPY, $ → USD, € → EUR.\\n\\n---\\n\\nJAPANESE INVOICE FIELD MAPPING:\\n- invoice_number  ← 請求書番号 / 請求番号 / No. / 整理番号\\n- vendor_name     ← 請求元 / 発行者 / 会社名 (issuing company)\\n- invoice_date    ← 請求日 / 発行日 / 作成日\\n- due_date        ← 支払期日 / お支払期限 / 支払い期限\\n- total_amount    ← 合計金額 / ご請求金額 / 請求総額 / お支払い金額\\n- line items      ← 明細 / 内訳\\n\\nTAX HANDLING (Japanese invoices):\\n- If both 税抜 (pre-tax) and 税込 (tax-inclusive) totals are shown, use the 税込 amount as total_amount.\\n- If only the 税抜 amount is shown (no 税込 line), use it and set notes to include \"tax_handling: exclusive\".\\n- 消費税 (consumption tax) is typically 10% (standard) or 8% (reduced, food/beverages). Note which rate applies if visible.\\n\\n---\\n\\nCONFIDENCE SCORING:\\nSet the \"confidence\" field to one of: \"high\", \"medium\", or \"low\".\\n\\n- \"high\":   All required fields (invoice_number, vendor_name, total_amount) are clearly and unambiguously visible. Document structure is clean and readable.\\n- \"medium\": At least one required field was inferred from context (e.g., total derived from line items) or the document has minor legibility issues. All required fields still have a value.\\n- \"low\":    One or more required fields are missing, the document is significantly degraded (photo at an angle, heavy watermark, handwritten), or there are multiple plausible conflicting values.\\n\\n---\\n\\nREQUIRED OUTPUT SCHEMA:\\n\\n{\\n  \"invoice_number\": string | null,\\n  \"vendor_name\": string | null,\\n  \"invoice_date\": string | null,        // YYYY-MM-DD\\n  \"due_date\": string | null,            // YYYY-MM-DD\\n  \"total_amount\": number | null,        // numeric, no symbols\\n  \"currency\": string | null,            // ISO 4217 (JPY, USD, EUR...)\\n  \"line_items\": [\\n    {\\n      \"description\": string,\\n      \"quantity\": number | null,\\n      \"unit_price\": number | null\\n    }\\n  ] | null,\\n  \"notes\": string | null,               // unusual details, tax handling, ambiguities\\n  \"confidence\": \"high\" | \"medium\" | \"low\"\\n}\\n\\n---\\n\\nEXAMPLES OF CORRECT OUTPUT:\\n\\nEnglish invoice:\\n{\\n  \"invoice_number\": \"INV-2024-0042\",\\n  \"vendor_name\": \"Sample Corp Ltd\",\\n  \"invoice_date\": \"2024-03-01\",\\n  \"due_date\": \"2024-03-31\",\\n  \"total_amount\": 4500.00,\\n  \"currency\": \"USD\",\\n  \"line_items\": [\\n    { \"description\": \"Web design services\", \"quantity\": 1, \"unit_price\": 4000.00 },\\n    { \"description\": \"Domain registration\", \"quantity\": 1, \"unit_price\": 500.00 }\\n  ],\\n  \"notes\": null,\\n  \"confidence\": \"high\"\\n}\\n\\nJapanese invoice with tax:\\n{\\n  \"invoice_number\": \"2024-0015\",\\n  \"vendor_name\": \"株式会社サンプル\",\\n  \"invoice_date\": \"2024-03-05\",\\n  \"due_date\": \"2024-03-31\",\\n  \"total_amount\": 110000,\\n  \"currency\": \"JPY\",\\n  \"line_items\": [\\n    { \"description\": \"システム開発費\", \"quantity\": 1, \"unit_price\": 100000 }\\n  ],\\n  \"notes\": \"税込金額 110,000円（消費税10%）。銀行振込: みずほ銀行 普通 1234567。\",\\n  \"confidence\": \"high\"\\n}\\n\\n---\\n\\nNow extract all fields from the provided invoice. Return JSON only.\\n') }}\n        },\n        {\n          \"type\": {{ Object.values($binary)[0]?.mimeType && Object.values($binary)[0]?.mimeType.startsWith('image/') ? '\"input_image\"' : '\"input_file\"' }},\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": {{ JSON.stringify(Object.values($binary)[0]?.mimeType || 'application/pdf') }},\n            \"data\": {{ JSON.stringify(Object.values($binary)[0]?.data) }}\n          }\n        }\n      ]\n    }\n  ],\n  \"text\": {\n    \"format\": {\n      \"type\": \"json_schema\",\n      \"name\": \"invoice_extraction\",\n      \"strict\": true,\n      \"schema\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"invoice_number\": { \"type\": [\"string\", \"null\"] },\n          \"vendor_name\":    { \"type\": [\"string\", \"null\"] },\n          \"invoice_date\":   { \"type\": [\"string\", \"null\"] },\n          \"due_date\":       { \"type\": [\"string\", \"null\"] },\n          \"total_amount\":   { \"type\": [\"number\", \"null\"] },\n          \"currency\":       { \"type\": [\"string\", \"null\"] },\n          \"line_items\": {\n            \"oneOf\": [\n              {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"object\",\n                  \"properties\": {\n                    \"description\": { \"type\": \"string\" },\n                    \"quantity\":    { \"type\": [\"number\", \"null\"] },\n                    \"unit_price\":  { \"type\": [\"number\", \"null\"] }\n                  },\n                  \"required\": [\"description\", \"quantity\", \"unit_price\"],\n                  \"additionalProperties\": false\n                }\n              },\n              { \"type\": \"null\" }\n            ]\n          },\n          \"notes\":      { \"type\": [\"string\", \"null\"] },\n          \"confidence\": { \"type\": \"string\", \"enum\": [\"high\", \"medium\", \"low\"] }\n        },\n        \"required\": [\"invoice_number\", \"vendor_name\", \"invoice_date\", \"due_date\", \"total_amount\", \"currency\", \"line_items\", \"notes\", \"confidence\"],\n        \"additionalProperties\": false\n      }\n    }\n  }\n}",
         "options": {
           "timeout": 60000
         }
@@ -99,8 +146,12 @@
       "name": "OpenAI — Extract Invoice",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [920, 300],
-      "notes": "Sends the attachment binary (PDF or image) to GPT-4o via the OpenAI Responses API. Uses a strict JSON schema response_format so the model is constrained to return exactly the fields we need — no free-form prose. The EXTRACTION_PROMPT workflow variable holds the full prompt text (set it in n8n → Variables). Timeout is 60s to accommodate large multi-page PDFs.",
+      "position": [
+        1160,
+        160
+      ],
+      "disabled": true,
+      "notes": "Sends the attachment to GPT-4o via the OpenAI Responses API. Uses strict JSON schema enforcement (strict: true) so the model is constrained to return exactly the fields defined — no free-form prose. Supports both PDF (input_file) and image (input_image) — auto-detected from MIME type.\n\nVariables used:\n  LLM_BASE_URL → 'https://api.openai.com'\n  LLM_MODEL    → 'gpt-4o'\n\nTimeout is 60s to accommodate large multi-page PDFs.",
       "credentials": {
         "openAiApi": {
           "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID",
@@ -110,15 +161,78 @@
     },
     {
       "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "={{ Object.keys($binary)[0] }}"
+      },
+      "id": "extract-from-file",
+      "name": "Extract From File",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        520
+      ],
+      "notes": "Extracts plain text from the PDF attachment. Output: $json.text. Sits in the Ollama branch only — text models process extracted text directly, avoiding the base64 image encoding path."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://127.0.0.1:11434/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"qwen3:8b\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify('You are a precise, bilingual (English and Japanese) invoice data extraction specialist.\\n\\nYour task is to extract structured data from the provided invoice text.\\n\\nRULES:\\n- Return ONLY valid JSON. No markdown, no explanation, no preamble, no trailing text.\\n- If a field is not present or cannot be determined with confidence, return null. Do NOT guess or infer values that are not clearly stated.\\n- Dates must be formatted as ISO 8601 (YYYY-MM-DD). If only year+month are given, return YYYY-MM-01.\\n- Amounts must be numeric (no currency symbols, no commas). E.g., 12,500 → 12500. 1,234.56 → 1234.56.\\n- Currency must be the 3-letter ISO code (JPY, USD, EUR, GBP, etc.). Infer from symbols: ¥/円 → JPY, $ → USD, € → EUR.\\n\\n---\\n\\nJAPANESE INVOICE FIELD MAPPING:\\n- invoice_number  ← 請求書番号 / 請求番号 / No. / 整理番号\\n- vendor_name     ← 請求元 / 発行者 / 会社名 (issuing company)\\n- invoice_date    ← 請求日 / 発行日 / 作成日\\n- due_date        ← 支払期日 / お支払期限 / 支払い期限\\n- total_amount    ← 合計金額 / ご請求金額 / 請求総額 / お支払い金額\\n- line items      ← 明細 / 内訳\\n\\nTAX HANDLING (Japanese invoices):\\n- If both 税抜 (pre-tax) and 税込 (tax-inclusive) totals are shown, use the 税込 amount as total_amount.\\n- If only the 税抜 amount is shown (no 税込 line), use it and set notes to include \"tax_handling: exclusive\".\\n- 消費税 (consumption tax) is typically 10% (standard) or 8% (reduced, food/beverages). Note which rate applies if visible.\\n\\n---\\n\\nCONFIDENCE SCORING:\\nSet the \"confidence\" field to one of: \"high\", \"medium\", or \"low\".\\n\\n- \"high\":   All required fields (invoice_number, vendor_name, total_amount) are clearly and unambiguously visible. Document structure is clean and readable.\\n- \"medium\": At least one required field was inferred from context (e.g., total derived from line items) or the document has minor legibility issues. All required fields still have a value.\\n- \"low\":    One or more required fields are missing, the document is significantly degraded (photo at an angle, heavy watermark, handwritten), or there are multiple plausible conflicting values.\\n\\n---\\n\\nREQUIRED OUTPUT SCHEMA:\\n\\n{\\n  \"invoice_number\": string | null,\\n  \"vendor_name\": string | null,\\n  \"invoice_date\": string | null,        // YYYY-MM-DD\\n  \"due_date\": string | null,            // YYYY-MM-DD\\n  \"total_amount\": number | null,        // numeric, no symbols\\n  \"currency\": string | null,            // ISO 4217 (JPY, USD, EUR...)\\n  \"line_items\": [\\n    {\\n      \"description\": string,\\n      \"quantity\": number | null,\\n      \"unit_price\": number | null\\n    }\\n  ] | null,\\n  \"notes\": string | null,               // unusual details, tax handling, ambiguities\\n  \"confidence\": \"high\" | \"medium\" | \"low\"\\n}\\n\\n---\\n\\nEXAMPLES OF CORRECT OUTPUT:\\n\\nEnglish invoice:\\n{\\n  \"invoice_number\": \"INV-2024-0042\",\\n  \"vendor_name\": \"Sample Corp Ltd\",\\n  \"invoice_date\": \"2024-03-01\",\\n  \"due_date\": \"2024-03-31\",\\n  \"total_amount\": 4500.00,\\n  \"currency\": \"USD\",\\n  \"line_items\": [\\n    { \"description\": \"Web design services\", \"quantity\": 1, \"unit_price\": 4000.00 },\\n    { \"description\": \"Domain registration\", \"quantity\": 1, \"unit_price\": 500.00 }\\n  ],\\n  \"notes\": null,\\n  \"confidence\": \"high\"\\n}\\n\\nJapanese invoice with tax:\\n{\\n  \"invoice_number\": \"2024-0015\",\\n  \"vendor_name\": \"株式会社サンプル\",\\n  \"invoice_date\": \"2024-03-05\",\\n  \"due_date\": \"2024-03-31\",\\n  \"total_amount\": 110000,\\n  \"currency\": \"JPY\",\\n  \"line_items\": [\\n    { \"description\": \"システム開発費\", \"quantity\": 1, \"unit_price\": 100000 }\\n  ],\\n  \"notes\": \"税込金額 110,000円（消費税10%）。銀行振込: みずほ銀行 普通 1234567。\",\\n  \"confidence\": \"high\"\\n}\\n\\n---\\n\\nNow extract all fields from the provided invoice. Return JSON only.\\n\\nInvoice text:\\n\\n' + $json.text) }}\n    }\n  ],\n  \"options\": { \"num_ctx\": 8192 },\n  \"stream\": false\n}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "ollama-extract",
+      "name": "Ollama — Extract Invoice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        520
+      ],
+      "notes": "Sends extracted PDF text to a local Ollama text model via the OpenAI-compatible chat completions API. Uses qwen3:8b by default — fast, bilingual, and strong at structured JSON output without needing vision capability. The text was extracted from the PDF by the preceding Extract From File node. The Normalize Response node strips any <think>...</think> reasoning blocks qwen3 may emit."
+    },
+    {
+      "parameters": {
         "language": "javaScript",
-        "jsCode": "// Pull the structured output from the OpenAI Responses API envelope\nconst responseBody = $input.item.json;\n\n// The Responses API returns output[0].content[0].text for text responses\nlet rawText;\ntry {\n  rawText = responseBody.output[0].content[0].text;\n} catch (e) {\n  throw new Error('Unexpected OpenAI response shape: ' + JSON.stringify(responseBody));\n}\n\n// Parse the strict JSON the model was forced to return\nlet extracted;\ntry {\n  extracted = JSON.parse(rawText);\n} catch (e) {\n  throw new Error('OpenAI returned non-JSON: ' + rawText);\n}\n\nconst {\n  invoice_number,\n  vendor_name,\n  invoice_date,\n  due_date,\n  total_amount,\n  currency,\n  line_items,\n  notes,\n  confidence\n} = extracted;\n\n// Required fields for review routing\nconst REQUIRED = ['invoice_number', 'vendor_name', 'total_amount'];\nconst missingFields = REQUIRED.filter(f => extracted[f] == null);\n\n// Route to human review if confidence is not high OR any required field is missing\nconst needs_review = confidence !== 'high' || missingFields.length > 0;\n\n// Build a human-readable reason for the review sheet\nlet review_reason = null;\nif (needs_review) {\n  const reasons = [];\n  if (confidence !== 'high') reasons.push(`confidence=${confidence}`);\n  if (missingFields.length > 0) reasons.push(`missing: ${missingFields.join(', ')}`);\n  review_reason = reasons.join('; ');\n}\n\n// Serialize line_items as a compact JSON string (one cell in Sheets)\nconst line_items_json = line_items ? JSON.stringify(line_items) : null;\n\n// Grab email + attachment metadata from the Gmail trigger (two items up in the chain)\nconst emailData = $('Gmail Trigger').item.json;\nconst binaryData = $input.item.binary?.data || {};\nconst attachment_filename = binaryData.fileName || binaryData.fileExtension\n  ? `${binaryData.fileName || 'attachment'}`\n  : 'unknown';\n\nreturn [{\n  json: {\n    // Metadata\n    timestamp: new Date().toISOString(),\n    email_from: emailData.from,\n    email_subject: emailData.subject,\n    attachment_filename,\n\n    // Extracted fields\n    invoice_number,\n    vendor_name,\n    invoice_date,\n    due_date,\n    total_amount,\n    currency,\n    line_items_json,\n    notes,\n    confidence,\n\n    // Routing\n    needs_review,\n    review_reason,\n\n    // Raw response for audit trail\n    raw_json: rawText\n  }\n}];\n"
+        "jsCode": "// Normalizes the raw HTTP response from whichever LLM provider was used\n// into a common shape before Parse & Classify.\n//\n// Each provider wraps the model output differently:\n//   'openai' (Responses API)     → output[0].content[0].text\n//   'ollama' (Chat Completions, text model) → choices[0].message.content\n//\n// qwen3-vl may wrap its reasoning in <think>...</think> tags inside content.\n// We strip those before passing to Parse & Classify.\n//\n// Output: { extracted_text: string }\n\nconst provider = 'ollama'; // hardcoded for local demo\nconst body = $input.item.json;\n\nlet extracted_text;\n\nif (provider === 'ollama') {\n  try {\n    extracted_text = body.choices[0].message.content;\n  } catch (e) {\n    throw new Error('Unexpected Ollama response shape: ' + JSON.stringify(body));\n  }\n  // Strip <think>...</think> reasoning blocks (qwen3 family without format:json)\n  extracted_text = extracted_text.replace(/<think>[\\s\\S]*?<\\/think>/g, '').trim();\n} else {\n  // Default: OpenAI Responses API\n  try {\n    extracted_text = body.output[0].content[0].text;\n  } catch (e) {\n    throw new Error('Unexpected OpenAI response shape: ' + JSON.stringify(body));\n  }\n}\n\nif (!extracted_text) {\n  throw new Error('Empty LLM response from provider \"' + provider + '\": ' + JSON.stringify(body));\n}\n\nreturn [{ json: { extracted_text } }];"
+      },
+      "id": "normalize-response",
+      "name": "Normalize Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        300
+      ],
+      "notes": "The only node that knows about provider-specific response formats. Unwraps the raw HTTP response and outputs a unified { extracted_text } field. Parse & Classify reads from this field and has no knowledge of which provider ran."
+    },
+    {
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// extracted_text is set by the upstream Normalize Response node.\n// It holds the raw JSON string the LLM returned, regardless of provider.\nconst rawText = $json.extracted_text;\n\n// Parse the JSON the model was instructed to return\nlet extracted;\ntry {\n  extracted = JSON.parse(rawText);\n} catch (e) {\n  throw new Error('LLM returned non-JSON: ' + rawText);\n}\n\nconst {\n  invoice_number,\n  vendor_name,\n  invoice_date,\n  due_date,\n  total_amount,\n  currency,\n  line_items,\n  notes,\n  confidence\n} = extracted;\n\n// Required fields for review routing\nconst REQUIRED = ['invoice_number', 'vendor_name', 'total_amount'];\nconst missingFields = REQUIRED.filter(f => extracted[f] == null);\n\n// Route to human review if confidence is not high OR any required field is missing\nconst needs_review = confidence !== 'high' || missingFields.length > 0;\n\n// Build a human-readable reason for the review sheet\nlet review_reason = null;\nif (needs_review) {\n  const reasons = [];\n  if (confidence !== 'high') reasons.push(`confidence=${confidence}`);\n  if (missingFields.length > 0) reasons.push(`missing: ${missingFields.join(', ')}`);\n  review_reason = reasons.join('; ');\n}\n\n// -- Uncomment to include detailed fields in Sheets output --\n// const line_items_json = line_items ? JSON.stringify(line_items) : null;\n// const emailData = $('Gmail Trigger').item.json;\n// const binaryData = Object.values($input.item.binary || {})[0] || {};\n// const attachment_filename = binaryData.fileName || binaryData.fileExtension\n//   ? `${binaryData.fileName || 'attachment'}`\n//   : 'unknown';\n\nreturn [{\n  json: {\n    timestamp: new Date().toISOString(),\n    vendor_name,\n    invoice_number,\n    invoice_date,\n    due_date,\n    total_amount,\n    currency,\n    confidence,\n    notes,\n\n    // Routing (required — do not remove)\n    needs_review,\n\n    // -- Uncomment to include detailed fields in Sheets output --\n    // email_from: emailData.from,\n    // email_subject: emailData.subject,\n    // attachment_filename,\n    // line_items_json,\n    // review_reason,\n    // raw_json: rawText\n  }\n}];\n"
       },
       "id": "code-parse-classify",
       "name": "Parse & Classify",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1160, 300],
-      "notes": "Unwraps the OpenAI Responses API envelope, parses the strict JSON payload, and computes the 'needs_review' boolean. Rule: needs_review = true if confidence != 'high' OR if invoice_number, vendor_name, or total_amount is null. Also serialises line_items to a JSON string for single-cell storage in Google Sheets, and attaches email metadata (sender, subject, filename) for the audit trail."
+      "position": [
+        1640,
+        300
+      ],
+      "notes": "Parses the extracted_text JSON string from Normalize Response, computes the needs_review boolean, and assembles the final row shape for Google Sheets. Review rule: needs_review = true if confidence != 'high' OR if invoice_number, vendor_name, or total_amount is null. Also serialises line_items to a JSON string for single-cell storage and attaches email metadata for the audit trail."
     },
     {
       "parameters": {
@@ -147,38 +261,26 @@
       "name": "Needs Review?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1400, 300],
+      "position": [
+        1880,
+        300
+      ],
       "notes": "Branches on the needs_review flag computed by the previous Code node. 'true' branch → Needs Review sheet + warning Slack message. 'false' branch → main Invoices sheet + success Slack message."
     },
     {
       "parameters": {
         "operation": "append",
         "documentId": {
-          "mode": "define",
+          "mode": "id",
           "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID"
         },
         "sheetName": {
-          "mode": "define",
+          "mode": "name",
           "value": "Invoices"
         },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "timestamp":           "={{ $json.timestamp }}",
-            "email_from":          "={{ $json.email_from }}",
-            "email_subject":       "={{ $json.email_subject }}",
-            "attachment_filename": "={{ $json.attachment_filename }}",
-            "invoice_number":      "={{ $json.invoice_number }}",
-            "vendor_name":         "={{ $json.vendor_name }}",
-            "invoice_date":        "={{ $json.invoice_date }}",
-            "due_date":            "={{ $json.due_date }}",
-            "total_amount":        "={{ $json.total_amount }}",
-            "currency":            "={{ $json.currency }}",
-            "line_items_json":     "={{ $json.line_items_json }}",
-            "notes":               "={{ $json.notes }}",
-            "confidence":          "={{ $json.confidence }}",
-            "raw_json":            "={{ $json.raw_json }}"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": {}
         },
         "options": {}
       },
@@ -186,8 +288,11 @@
       "name": "Sheets — Append Invoice",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1640, 200],
-      "notes": "Appends a new row to the 'Invoices' tab of your Google Sheet. Replace REPLACE_WITH_YOUR_GOOGLE_SHEET_ID with the Sheet ID from the URL (the long string between /d/ and /edit). The sheet must have a header row matching these column names — see the README for the exact schema.",
+      "position": [
+        2120,
+        200
+      ],
+      "notes": "Appends a new row to the 'Invoices' tab of your Google Sheet. Replace REPLACE_WITH_YOUR_GOOGLE_SHEET_ID with the Sheet ID from the URL (the long string between /d/ and /edit). The sheet must have a header row matching these column names.",
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "REPLACE_WITH_YOUR_SHEETS_CREDENTIAL_ID",
@@ -199,32 +304,16 @@
       "parameters": {
         "operation": "append",
         "documentId": {
-          "mode": "define",
+          "mode": "id",
           "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID"
         },
         "sheetName": {
-          "mode": "define",
-          "value": "Needs Review"
+          "mode": "name",
+          "value": "Invoices"
         },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "timestamp":           "={{ $json.timestamp }}",
-            "email_from":          "={{ $json.email_from }}",
-            "email_subject":       "={{ $json.email_subject }}",
-            "attachment_filename": "={{ $json.attachment_filename }}",
-            "invoice_number":      "={{ $json.invoice_number }}",
-            "vendor_name":         "={{ $json.vendor_name }}",
-            "invoice_date":        "={{ $json.invoice_date }}",
-            "due_date":            "={{ $json.due_date }}",
-            "total_amount":        "={{ $json.total_amount }}",
-            "currency":            "={{ $json.currency }}",
-            "line_items_json":     "={{ $json.line_items_json }}",
-            "notes":               "={{ $json.notes }}",
-            "confidence":          "={{ $json.confidence }}",
-            "review_reason":       "={{ $json.review_reason }}",
-            "raw_json":            "={{ $json.raw_json }}"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": {}
         },
         "options": {}
       },
@@ -232,7 +321,10 @@
       "name": "Sheets — Needs Review",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1640, 400],
+      "position": [
+        2120,
+        400
+      ],
       "notes": "Appends rows that need human review to the 'Needs Review' tab. Includes a review_reason column explaining why it was flagged (e.g. 'confidence=medium' or 'missing: invoice_number'). A team member should check this tab regularly and either correct the data or reprocess the attachment.",
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -245,17 +337,20 @@
       "parameters": {
         "select": "channel",
         "channelId": {
-          "mode": "define",
+          "mode": "id",
           "value": "REPLACE_WITH_YOUR_SLACK_CHANNEL_ID"
         },
-        "text": "=✅ *Invoice processed*\n>Vendor: {{ $json.vendor_name || '_unknown_' }}\n>Amount: {{ $json.currency }} {{ $json.total_amount }}\n>Invoice #: {{ $json.invoice_number || '_unknown_' }}\n>Confidence: {{ $json.confidence }}\n>File: {{ $json.attachment_filename }}",
+        "text": "=✅ *Invoice processed* — {{ $json.vendor_name || 'Unknown vendor' }}, {{ $json.invoice_date || 'no date' }} · {{ $json.currency }} {{ $json.total_amount }}",
         "otherOptions": {}
       },
       "id": "slack-success",
       "name": "Slack — Processed ✅",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
-      "position": [1880, 200],
+      "position": [
+        2360,
+        200
+      ],
       "notes": "Posts a success summary to your Slack channel after a high-confidence invoice is written to the main sheet. Replace REPLACE_WITH_YOUR_SLACK_CHANNEL_ID with the channel ID (right-click channel in Slack → Copy link → the C... string at the end).",
       "credentials": {
         "slackOAuth2Api": {
@@ -268,18 +363,21 @@
       "parameters": {
         "select": "channel",
         "channelId": {
-          "mode": "define",
+          "mode": "id",
           "value": "REPLACE_WITH_YOUR_SLACK_CHANNEL_ID"
         },
-        "text": "=⚠️ *Invoice needs review*\n>File: {{ $json.attachment_filename }}\n>From: {{ $json.email_from }}\n>Reason: {{ $json.review_reason }}\n>Vendor: {{ $json.vendor_name || '_could not extract_' }}\n>Check the *Needs Review* tab in Google Sheets.",
+        "text": "=⚠️ *Invoice needs review* — {{ $json.vendor_name || 'Unknown vendor' }}, {{ $json.invoice_date || 'no date' }}",
         "otherOptions": {}
       },
       "id": "slack-review",
       "name": "Slack — Needs Review ⚠️",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.2,
-      "position": [1880, 400],
-      "notes": "Sends a warning to Slack when an invoice couldn't be processed with high confidence. Includes the reason for flagging and a pointer to the Needs Review sheet. A team member should action this within 1 business day to avoid payment delays.",
+      "position": [
+        2360,
+        400
+      ],
+      "notes": "Sends a warning to Slack when an invoice couldn't be processed with high confidence. Includes the reason for flagging and a pointer to the Needs Review sheet.",
       "credentials": {
         "slackOAuth2Api": {
           "id": "REPLACE_WITH_YOUR_SLACK_CREDENTIAL_ID",
@@ -291,44 +389,150 @@
   "connections": {
     "Gmail Trigger": {
       "main": [
-        [{ "node": "Has Attachment?", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Has Attachment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Has Attachment?": {
       "main": [
-        [{ "node": "Split Attachments", "type": "main", "index": 0 }],
+        [
+          {
+            "node": "Split Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
     "Split Attachments": {
       "main": [
-        [{ "node": "OpenAI — Extract Invoice", "type": "main", "index": 0 }]
+        [],
+        [
+          {
+            "node": "Provider Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Provider Switch": {
+      "main": [
+        [
+          {
+            "node": "OpenAI — Extract Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract From File",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "OpenAI — Extract Invoice": {
       "main": [
-        [{ "node": "Parse & Classify", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Normalize Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama — Extract Invoice": {
+      "main": [
+        [
+          {
+            "node": "Normalize Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Response": {
+      "main": [
+        [
+          {
+            "node": "Parse & Classify",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Parse & Classify": {
       "main": [
-        [{ "node": "Needs Review?", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Needs Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Needs Review?": {
       "main": [
-        [{ "node": "Sheets — Append Invoice", "type": "main", "index": 0 }],
-        [{ "node": "Sheets — Needs Review", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Sheets — Needs Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets — Append Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Sheets — Append Invoice": {
       "main": [
-        [{ "node": "Slack — Processed ✅", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Slack — Processed ✅",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Sheets — Needs Review": {
       "main": [
-        [{ "node": "Slack — Needs Review ⚠️", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Slack — Needs Review ⚠️",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract From File": {
+      "main": [
+        [
+          {
+            "node": "Ollama — Extract Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
@@ -340,9 +544,15 @@
   },
   "staticData": null,
   "tags": [
-    { "name": "portfolio" },
-    { "name": "invoice-processing" },
-    { "name": "ai-automation" }
+    {
+      "name": "portfolio"
+    },
+    {
+      "name": "invoice-processing"
+    },
+    {
+      "name": "ai-automation"
+    }
   ],
   "triggerCount": 1,
   "updatedAt": "2024-05-07T00:00:00.000Z",
