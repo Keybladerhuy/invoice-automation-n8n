@@ -1,0 +1,149 @@
+<svg width="100%" viewBox="0 0 680 235" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Invoice Automation Workflow</title>
+  <desc>Animated diagram showing an invoice email flowing through AI extraction to Google Sheets and a Slack notification</desc>
+
+  <defs>
+    <style>
+      @keyframes dotMove {
+        0%   { transform: translateX(0px);   opacity: 0; }
+        4%   { transform: translateX(0px);   opacity: 1; }
+        16%  { transform: translateX(0px);   opacity: 1; }
+        27%  { transform: translateX(160px); opacity: 1; }
+        39%  { transform: translateX(160px); opacity: 1; }
+        50%  { transform: translateX(320px); opacity: 1; }
+        62%  { transform: translateX(320px); opacity: 1; }
+        73%  { transform: translateX(480px); opacity: 1; }
+        85%  { transform: translateX(480px); opacity: 1; }
+        92%  { transform: translateX(480px); opacity: 0; }
+        93%  { transform: translateX(0px);   opacity: 0; }
+        100% { transform: translateX(0px);   opacity: 0; }
+      }
+      @keyframes glowGmail {
+        0%,3%,19%,100% { opacity: 0; }
+        7%,14%         { opacity: 1; }
+      }
+      @keyframes glowAI {
+        0%,26%,41%,100% { opacity: 0; }
+        30%,37%         { opacity: 1; }
+      }
+      @keyframes glowSheets {
+        0%,49%,64%,100% { opacity: 0; }
+        53%,60%         { opacity: 1; }
+      }
+      @keyframes glowSlack {
+        0%,72%,87%,100% { opacity: 0; }
+        76%,83%         { opacity: 1; }
+      }
+      @keyframes sIdle {
+        0%,1%    { opacity: 1; }
+        5%,90%   { opacity: 0; }
+        94%,100% { opacity: 1; }
+      }
+      @keyframes sGmail {
+        0%,3%,17%,100% { opacity: 0; }
+        6%,13%         { opacity: 1; }
+      }
+      @keyframes sAI {
+        0%,26%,41%,100% { opacity: 0; }
+        30%,37%         { opacity: 1; }
+      }
+      @keyframes sSheets {
+        0%,49%,64%,100% { opacity: 0; }
+        53%,60%         { opacity: 1; }
+      }
+      @keyframes sSlack {
+        0%,72%,91%,100% { opacity: 0; }
+        76%,87%         { opacity: 1; }
+      }
+
+      #dot         { animation: dotMove    10s linear infinite; }
+      #glow-gmail  { animation: glowGmail  10s linear infinite; }
+      #glow-ai     { animation: glowAI     10s linear infinite; }
+      #glow-sheets { animation: glowSheets 10s linear infinite; }
+      #glow-slack  { animation: glowSlack  10s linear infinite; }
+      #s-idle      { animation: sIdle      10s linear infinite; }
+      #s-gmail     { animation: sGmail     10s linear infinite; }
+      #s-ai        { animation: sAI        10s linear infinite; }
+      #s-sheets    { animation: sSheets    10s linear infinite; }
+      #s-slack     { animation: sSlack     10s linear infinite; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="680" height="235" fill="#ffffff"/>
+
+  <!-- Headline -->
+  <text x="340" y="28" text-anchor="middle" font-family="Arial, sans-serif"
+        font-size="13" font-weight="bold" fill="#111827">
+    Invoice automation — from email to spreadsheet in seconds
+  </text>
+
+  <!-- Connector lines + arrowheads -->
+  <line x1="152" y1="105" x2="202" y2="105" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <polygon points="202,102 208,105 202,108" fill="#d1d5db"/>
+  <line x1="312" y1="105" x2="362" y2="105" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <polygon points="362,102 368,105 362,108" fill="#d1d5db"/>
+  <line x1="472" y1="105" x2="522" y2="105" stroke="#d1d5db" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <polygon points="522,102 528,105 522,108" fill="#d1d5db"/>
+
+  <!-- ── Card 1: Gmail ── -->
+  <rect id="glow-gmail" x="46" y="43" width="108" height="122" rx="16" fill="#fee2e2" opacity="0"/>
+  <rect x="50" y="47" width="100" height="114" rx="14" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <circle cx="100" cy="97" r="27" fill="#ea4335"/>
+  <rect x="83" y="85" width="34" height="24" rx="2" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+  <polyline points="83,85 100,98 117,85" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+  <text x="100" y="133" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#111827">Gmail</text>
+  <text x="100" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#6b7280">Invoice Email</text>
+
+  <!-- ── Card 2: AI Model ── -->
+  <rect id="glow-ai" x="206" y="43" width="108" height="122" rx="16" fill="#ede9fe" opacity="0"/>
+  <rect x="210" y="47" width="100" height="114" rx="14" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <circle cx="260" cy="97" r="27" fill="#7c3aed"/>
+  <!-- 4-pointed sparkle -->
+  <path d="M260,76 L263,95 L260,115 L257,95 Z" fill="#ffffff"/>
+  <path d="M239,97 L258,94 L281,97 L258,100 Z" fill="#ffffff"/>
+  <circle cx="246" cy="83" r="2.5" fill="#c4b5fd"/>
+  <circle cx="274" cy="83" r="2.5" fill="#c4b5fd"/>
+  <circle cx="246" cy="111" r="2.5" fill="#c4b5fd"/>
+  <circle cx="274" cy="111" r="2.5" fill="#c4b5fd"/>
+  <text x="260" y="133" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#111827">AI Model</text>
+  <text x="260" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#6b7280">Extracts Data</text>
+
+  <!-- ── Card 3: Google Sheets ── -->
+  <rect id="glow-sheets" x="366" y="43" width="108" height="122" rx="16" fill="#dcfce7" opacity="0"/>
+  <rect x="370" y="47" width="100" height="114" rx="14" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <circle cx="420" cy="97" r="27" fill="#0f9d58"/>
+  <!-- Spreadsheet grid -->
+  <rect x="405" y="83" width="30" height="28" rx="2" fill="none" stroke="#ffffff" stroke-width="1.8"/>
+  <line x1="405" y1="92" x2="435" y2="92" stroke="#ffffff" stroke-width="1.2"/>
+  <line x1="405" y1="101" x2="435" y2="101" stroke="#ffffff" stroke-width="1.2"/>
+  <line x1="416" y1="83" x2="416" y2="111" stroke="#ffffff" stroke-width="1.2"/>
+  <rect x="405" y="83" width="11" height="9" rx="1" fill="#ffffff" fill-opacity="0.45"/>
+  <text x="420" y="133" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#111827">Sheets</text>
+  <text x="420" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#6b7280">Row Added</text>
+
+  <!-- ── Card 4: Slack ── -->
+  <rect id="glow-slack" x="526" y="43" width="108" height="122" rx="16" fill="#fdf4ff" opacity="0"/>
+  <rect x="530" y="47" width="100" height="114" rx="14" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <circle cx="580" cy="97" r="27" fill="#4a154b"/>
+  <!-- Hash # -->
+  <line x1="567" y1="92" x2="593" y2="92" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="567" y1="102" x2="593" y2="102" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="574" y1="84" x2="574" y2="110" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="586" y1="84" x2="586" y2="110" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+  <text x="580" y="133" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#111827">Slack</text>
+  <text x="580" y="147" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#6b7280">Team Notified</text>
+
+  <!-- Animated dot (drawn last = always on top) -->
+  <circle id="dot" cx="100" cy="105" r="5" fill="#3b82f6" opacity="0"/>
+
+  <!-- Status label row -->
+  <text id="s-idle"   x="340" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#9ca3af">Watching for new invoices...</text>
+  <text id="s-gmail"  x="340" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#dc2626" opacity="0">New invoice email detected</text>
+  <text id="s-ai"     x="340" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#7c3aed" opacity="0">AI extracting invoice data...</text>
+  <text id="s-sheets" x="340" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#15803d" opacity="0">Row added to spreadsheet</text>
+  <text id="s-slack"  x="340" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#7e22ce" opacity="0">Team notified on Slack</text>
+
+  <!-- Tagline -->
+  <text x="340" y="220" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#d1d5db">Powered by n8n + AI  ·  invoice-automation-n8n</text>
+</svg>

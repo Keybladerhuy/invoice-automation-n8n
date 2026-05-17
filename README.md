@@ -1,5 +1,7 @@
 # Invoice Automation — n8n
 
+![Invoice automation workflow](./img/workflow-animation.svg)
+
 > Automatically extract invoice data from email attachments and write it to Google Sheets — no manual entry required.
 
 ---
