@@ -1,4 +1,4 @@
-# AI-Powered Invoice Processing Workflow
+# Invoice Automation — n8n
 
 > Automatically extract invoice data from email attachments and write it to Google Sheets — no manual entry required.
 
@@ -197,7 +197,7 @@ If your invoices arrive exclusively as images (PNG/JPG), you can swap the OpenAI
 
 ## 日本語
 
-# AIを使った請求書自動処理ワークフロー
+# 請求書自動化 — n8n
 
 > Gmailに届いた請求書の添付ファイルを自動で読み取り、Googleスプレッドシートにデータを転記します。手入力不要。
 
